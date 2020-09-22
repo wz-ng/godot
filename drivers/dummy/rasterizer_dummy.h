@@ -40,6 +40,18 @@
 
 class RasterizerSceneDummy : public RasterizerScene {
 public:
+	virtual void environment_set_volumetric_fog(RID p_env, bool p_enable, float p_density, const Color &p_light, float p_light_energy, float p_length, float p_detail_spread, float p_gi_inject, RS::EnvVolumetricFogShadowFilter p_shadow_filter) {}
+
+	virtual void environment_set_volumetric_fog_volume_size(int p_size, int p_depth) {}
+
+	virtual void environment_set_volumetric_fog_filter_active(bool p_enable) {}
+
+	virtual void environment_set_volumetric_fog_directional_shadow_shrink_size(int p_shrink_size) {}
+
+	virtual void environment_set_volumetric_fog_positional_shadow_shrink_size(int p_shrink_size) {}
+
+	virtual void environment_set_fog(RID p_env, bool p_enable, const Color &p_light_color, float p_light_energy, float p_sun_scatter, float p_density, float p_height, float p_height_density) {}
+
 	/* SHADOW ATLAS API */
 
 	RID shadow_atlas_create() override { return RID(); }
@@ -211,10 +223,15 @@ public:
 	mutable RID_PtrOwner<DummyTexture> texture_owner;
 	mutable RID_PtrOwner<DummyMesh> mesh_owner;
 
-	RID texture_2d_create(const Ref<Image> &p_image) override { return RID(); }
-	RID texture_2d_layered_create(const Vector<Ref<Image>> &p_layers, RS::TextureLayeredType p_layered_type) override { return RID(); }
-	RID texture_3d_create(Image::Format, int p_width, int p_height, int p_depth, bool p_mipmaps, const Vector<Ref<Image>> &p_data) override { return RID(); }
-	RID texture_proxy_create(RID p_base) override { return RID(); }
+	virtual RID texture_2d_create(const Ref<Image> &p_image) {
+		DummyTexture *texture = memnew(DummyTexture);
+		ERR_FAIL_COND_V(!texture, RID());
+		return texture_owner.make_rid(texture);
+	}
+
+	virtual RID texture_2d_layered_create(const Vector<Ref<Image>> &p_layers, RS::TextureLayeredType p_layered_type) { return RID(); }
+	virtual RID texture_3d_create(const Vector<Ref<Image>> &p_slices) { return RID(); }
+	virtual RID texture_proxy_create(RID p_base) { return RID(); }
 
 	void texture_2d_update_immediate(RID p_texture, const Ref<Image> &p_image, int p_layer = 0) override {}
 	void texture_2d_update(RID p_texture, const Ref<Image> &p_image, int p_layer = 0) override {}
@@ -232,12 +249,29 @@ public:
 	void texture_replace(RID p_texture, RID p_by_texture) override {}
 	void texture_set_size_override(RID p_texture, int p_width, int p_height) override {}
 // FIXME: Disabled during Vulkan refactoring, should be ported.
-#if 0
-	void texture_bind(RID p_texture, uint32_t p_texture_no) = 0;
+#if 1
+	virtual void texture_bind(RID p_texture, uint32_t p_texture_no){};
+
+	virtual RID texture_3d_create(Image::Format, int p_width, int p_height, int p_depth, bool p_mipmaps, const Vector<Ref<Image>> &p_data) { return RID(); }
+
+	virtual void texture_3d_update(RID p_texture, const Vector<Ref<Image>> &p_data) {}
+	virtual Vector<Ref<Image>> texture_3d_get(RID p_texture) const { return Vector<Ref<Image>>(); }
+	virtual void particles_emit(RID p_particles, const Transform &p_transform, const Vector3 &p_velocity, const Color &p_color, const Color &p_custom, uint32_t p_emit_flags) {}
+	virtual void particles_set_subemitter(RID p_particles, RID p_subemitter_particles) {}
+	virtual void particles_set_view_axis(RID p_particles, const Vector3 &p_axis) {}
+
 #endif
 
-	void texture_set_path(RID p_texture, const String &p_path) override {}
-	String texture_get_path(RID p_texture) const override { return String(); }
+	virtual void texture_set_path(RID p_texture, const String &p_path) {
+		DummyTexture *t = texture_owner.getornull(p_texture);
+		ERR_FAIL_COND(!t);
+		t->path = p_path;
+	}
+	virtual String texture_get_path(RID p_texture) const {
+		DummyTexture *t = texture_owner.getornull(p_texture);
+		ERR_FAIL_COND_V(!t, String());
+		return t->path;
+	}
 
 	void texture_set_detect_3d_callback(RID p_texture, RS::TextureDetectCallback p_callback, void *p_userdata) override {}
 	void texture_set_detect_normal_callback(RID p_texture, RS::TextureDetectCallback p_callback, void *p_userdata) override {}

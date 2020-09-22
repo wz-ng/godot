@@ -1,5 +1,5 @@
 /*************************************************************************/
-/*  godot_server.cpp                                                     */
+/*  register_types.cpp                                                   */
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
@@ -28,24 +28,10 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
 
-#define X11_ENABLED
+#include "register_no_types.h"
 
-#include "main/main.h"
-#include "os_server.h"
+void register_lightmapper_rd_types() {
+}
 
-int main(int argc, char *argv[]) {
-	OS_Server os;
-
-	// We must override main when testing is enabled
-	TEST_MAIN_OVERRIDE
-
-	Error err = Main::setup(argv[0], argc - 1, &argv[1]);
-	if (err != OK)
-		return 255;
-
-	if (Main::start())
-		os.run(); // it is actually the OS that decides how to run
-	Main::cleanup();
-
-	return os.get_exit_code();
+void unregister_lightmapper_rd_types() {
 }

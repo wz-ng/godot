@@ -2,6 +2,7 @@
 
 Import("env")
 
-env.add_source_files(env.servers_sources, "*.cpp")
+if not env["platform"] == "server":
+	env.add_source_files(env.servers_sources, "*.cpp")
 
-SConscript("shaders/SCsub")
+	SConscript("shaders/SCsub")

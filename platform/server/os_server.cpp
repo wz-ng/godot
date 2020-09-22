@@ -30,117 +30,66 @@
 
 #include "os_server.h"
 
-#include "core/print_string.h"
-#include "drivers/dummy/rasterizer_dummy.h"
-#include "drivers/dummy/texture_loader_dummy.h"
-#include "servers/rendering/rendering_server_raster.h"
-
+#include "core/os/dir_access.h"
 #include "main/main.h"
+
+#include "display_server_headless.h"
+
+#ifdef HAVE_MNTENT
+#include <mntent.h>
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
-int OS_Server::get_video_driver_count() const {
-	return 1;
-}
-
-const char *OS_Server::get_video_driver_name(int p_driver) const {
-	return "Dummy";
-}
-
-int OS_Server::get_audio_driver_count() const {
-	return 1;
-}
-
-const char *OS_Server::get_audio_driver_name(int p_driver) const {
-	return "Dummy";
-}
-
-int OS_Server::get_current_video_driver() const {
-	return video_driver_index;
-}
-
-void OS_Server::initialize_core() {
+void OS_Server::initialize() {
 	crash_handler.initialize();
 
 	OS_Unix::initialize_core();
 }
 
-Error OS_Server::initialize(const VideoMode &p_desired, int p_video_driver, int p_audio_driver) {
-	args = OS::get_singleton()->get_cmdline_args();
-	current_videomode = p_desired;
-	main_loop = nullptr;
+void OS_Server::initialize_joypads() {
+#ifdef JOYDEV_ENABLED
+	joypad = memnew(JoypadLinux(Input::get_singleton()));
+#endif
+}
 
-	RasterizerDummy::make_current();
-
-	video_driver_index = p_video_driver; // unused in server platform, but should still be initialized
-
-	rendering_server = memnew(RenderingServerRaster);
-	rendering_server->init();
-
-	AudioDriverManager::initialize(p_audio_driver);
-
-	input = memnew(InputDefault);
-
-	_ensure_user_data_dir();
-
-	resource_loader_dummy.instance();
-	ResourceLoader::add_resource_format_loader(resource_loader_dummy);
-
-	return OK;
+String OS_Server::get_unique_id() const {
+	static String machine_id;
+	if (machine_id.empty()) {
+		if (FileAccess *f = FileAccess::open("/etc/machine-id", FileAccess::READ)) {
+			while (machine_id.empty() && !f->eof_reached()) {
+				machine_id = f->get_line().strip_edges();
+			}
+			f->close();
+			memdelete(f);
+		}
+	}
+	return machine_id;
 }
 
 void OS_Server::finalize() {
-	if (main_loop)
+	if (main_loop) {
 		memdelete(main_loop);
+	}
 	main_loop = nullptr;
 
-	rendering_server->finish();
-	memdelete(rendering_server);
+#ifdef ALSAMIDI_ENABLED
+	driver_alsamidi.close();
+#endif
 
-	memdelete(input);
-
-	ResourceLoader::remove_resource_format_loader(resource_loader_dummy);
-	resource_loader_dummy.unref();
-
-	args.clear();
-}
-
-void OS_Server::set_mouse_show(bool p_show) {
-}
-
-void OS_Server::set_mouse_grab(bool p_grab) {
-	grab = p_grab;
-}
-
-bool OS_Server::is_mouse_grab_enabled() const {
-	return grab;
-}
-
-int OS_Server::get_mouse_button_state() const {
-	return 0;
-}
-
-Point2 OS_Server::get_mouse_position() const {
-	return Point2();
-}
-
-void OS_Server::set_window_title(const String &p_title) {
-}
-
-void OS_Server::set_video_mode(const VideoMode &p_video_mode, int p_screen) {
-}
-
-OS::VideoMode OS_Server::get_video_mode(int p_screen) const {
-	return current_videomode;
-}
-
-Size2 OS_Server::get_window_size() const {
-	return Vector2(current_videomode.width, current_videomode.height);
-}
-
-void OS_Server::get_fullscreen_mode_list(List<VideoMode> *p_list, int p_screen) const {
+#ifdef JOYDEV_ENABLED
+	if (joypad) {
+		memdelete(joypad);
+	}
+#endif
 }
 
 MainLoop *OS_Server::get_main_loop() const {
@@ -148,45 +97,46 @@ MainLoop *OS_Server::get_main_loop() const {
 }
 
 void OS_Server::delete_main_loop() {
-	if (main_loop)
+	if (main_loop) {
 		memdelete(main_loop);
+	}
 	main_loop = nullptr;
 }
 
 void OS_Server::set_main_loop(MainLoop *p_main_loop) {
 	main_loop = p_main_loop;
-	input->set_main_loop(p_main_loop);
 }
-
-bool OS_Server::can_draw() const {
-	return false; //can never draw
-};
 
 String OS_Server::get_name() const {
-	return "Server";
+#ifdef __linux__
+	return "Linux";
+#elif defined(__FreeBSD__)
+	return "FreeBSD";
+#elif defined(__NetBSD__)
+	return "NetBSD";
+#else
+	return "BSD";
+#endif
 }
 
-void OS_Server::move_window_to_foreground() {
+Error OS_Server::shell_open(String p_uri) {
+	Error ok;
+	List<String> args;
+	args.push_back(p_uri);
+	ok = execute("xdg-open", args, false);
+	if (ok == OK) {
+		return OK;
+	}
+	ok = execute("gnome-open", args, false);
+	if (ok == OK) {
+		return OK;
+	}
+	ok = execute("kde-open", args, false);
+	return ok;
 }
 
 bool OS_Server::_check_internal_feature_support(const String &p_feature) {
 	return p_feature == "pc";
-}
-
-void OS_Server::run() {
-	force_quit = false;
-
-	if (!main_loop)
-		return;
-
-	main_loop->init();
-
-	while (!force_quit) {
-		if (Main::iteration())
-			break;
-	};
-
-	main_loop->finish();
 }
 
 String OS_Server::get_config_path() const {
@@ -260,9 +210,37 @@ String OS_Server::get_system_dir(SystemDir p_dir) const {
 	List<String> arg;
 	arg.push_back(xdgparam);
 	Error err = const_cast<OS_Server *>(this)->execute("xdg-user-dir", arg, true, nullptr, &pipe);
-	if (err != OK)
+	if (err != OK) {
 		return ".";
+	}
 	return pipe.strip_edges();
+}
+
+void OS_Server::run() {
+	force_quit = false;
+
+	if (!main_loop) {
+		return;
+	}
+
+	main_loop->init();
+
+	//uint64_t last_ticks=get_ticks_usec();
+
+	//int frames=0;
+	//uint64_t frame=0;
+
+	while (!force_quit) {
+		DisplayServer::get_singleton()->process_events(); // get rid of pending events
+#ifdef JOYDEV_ENABLED
+		joypad->process_joypads();
+#endif
+		if (Main::iteration()) {
+			break;
+		}
+	};
+
+	main_loop->finish();
 }
 
 void OS_Server::disable_crash_handler() {
@@ -273,7 +251,108 @@ bool OS_Server::is_disable_crash_handler() const {
 	return crash_handler.is_disabled();
 }
 
+static String get_mountpoint(const String &p_path) {
+	struct stat s;
+	if (stat(p_path.utf8().get_data(), &s)) {
+		return "";
+	}
+
+#ifdef HAVE_MNTENT
+	dev_t dev = s.st_dev;
+	FILE *fd = setmntent("/proc/mounts", "r");
+	if (!fd) {
+		return "";
+	}
+
+	struct mntent mnt;
+	char buf[1024];
+	size_t buflen = 1024;
+	while (getmntent_r(fd, &mnt, buf, buflen)) {
+		if (!stat(mnt.mnt_dir, &s) && s.st_dev == dev) {
+			endmntent(fd);
+			return String(mnt.mnt_dir);
+		}
+	}
+
+	endmntent(fd);
+#endif
+	return "";
+}
+
+Error OS_Server::move_to_trash(const String &p_path) {
+	String trash_can = "";
+	String mnt = get_mountpoint(p_path);
+
+	// If there is a directory "[Mountpoint]/.Trash-[UID]/files", use it as the trash can.
+	if (mnt != "") {
+		String path(mnt + "/.Trash-" + itos(getuid()) + "/files");
+		struct stat s;
+		if (!stat(path.utf8().get_data(), &s)) {
+			trash_can = path;
+		}
+	}
+
+	// Otherwise, if ${XDG_DATA_HOME} is defined, use "${XDG_DATA_HOME}/Trash/files" as the trash can.
+	if (trash_can == "") {
+		char *dhome = getenv("XDG_DATA_HOME");
+		if (dhome) {
+			trash_can = String(dhome) + "/Trash/files";
+		}
+	}
+
+	// Otherwise, if ${HOME} is defined, use "${HOME}/.local/share/Trash/files" as the trash can.
+	if (trash_can == "") {
+		char *home = getenv("HOME");
+		if (home) {
+			trash_can = String(home) + "/.local/share/Trash/files";
+		}
+	}
+
+	// Issue an error if none of the previous locations is appropriate for the trash can.
+	if (trash_can == "") {
+		ERR_PRINT("move_to_trash: Could not determine the trash can location");
+		return FAILED;
+	}
+
+	// Create needed directories for decided trash can location.
+	DirAccess *dir_access = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
+	Error err = dir_access->make_dir_recursive(trash_can);
+	memdelete(dir_access);
+
+	// Issue an error if trash can is not created proprely.
+	if (err != OK) {
+		ERR_PRINT("move_to_trash: Could not create the trash can \"" + trash_can + "\"");
+		return err;
+	}
+
+	// The trash can is successfully created, now move the given resource to it.
+	// Do not use DirAccess:rename() because it can't move files across multiple mountpoints.
+	List<String> mv_args;
+	mv_args.push_back(p_path);
+	mv_args.push_back(trash_can);
+	int retval;
+	err = execute("mv", mv_args, true, nullptr, nullptr, &retval);
+
+	// Issue an error if "mv" failed to move the given resource to the trash can.
+	if (err != OK || retval != 0) {
+		ERR_PRINT("move_to_trash: Could not move the resource \"" + p_path + "\" to the trash can \"" + trash_can + "\"");
+		return FAILED;
+	}
+
+	return OK;
+}
+
 OS_Server::OS_Server() {
-	//adriver here
-	grab = false;
-};
+	main_loop = nullptr;
+	force_quit = false;
+
+#ifdef PULSEAUDIO_ENABLED
+	AudioDriverManager::add_driver(&driver_pulseaudio);
+#endif
+
+#ifdef ALSA_ENABLED
+	AudioDriverManager::add_driver(&driver_alsa);
+#endif
+
+	DisplayServerHeadless::register_dummy_driver();
+}

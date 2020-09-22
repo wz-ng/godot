@@ -42,7 +42,7 @@ void EditorRunNative::_notification(int p_what) {
 				continue;
 			}
 			Ref<ImageTexture> icon = eep->get_run_icon();
-			if (!icon.is_null()) {
+if (false && !icon.is_null()) {
 				Ref<Image> im = icon->get_data();
 				im = im->duplicate();
 				im->clear_mipmaps();
